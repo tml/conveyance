@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "conveyance",
+  "project_id": "61718b6c-9f85-43f8-8b84-487bcd341665"
+}
