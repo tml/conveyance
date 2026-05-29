@@ -1,0 +1,162 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conveyance — Engine Design (Technical)</title><style>
+:root{--fg:#1c2330;--muted:#5b6676;--bg:#ffffff;--soft:#f5f7fa;--line:#e3e8ef;
+--accent:#2f6df6;--accent2:#0aa676;--code:#0b1020;--codefg:#e6edf3;}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+color:var(--fg);background:var(--bg)}
+.wrap{max-width:960px;margin:0 auto;padding:40px 24px 96px}
+header.doc{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:28px}
+.kicker{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+h1{font-size:34px;line-height:1.15;margin:.25em 0 .15em}
+h2{font-size:23px;margin:2em 0 .5em;padding-top:.3em;border-top:1px solid var(--line)}
+h3{font-size:18px;margin:1.4em 0 .4em}
+.sub{color:var(--muted);font-size:17px;margin:.2em 0 0}
+.badges{margin-top:14px}
+.badge{display:inline-block;font-size:12px;font-weight:600;background:var(--soft);
+border:1px solid var(--line);border-radius:999px;padding:3px 11px;margin:0 6px 6px 0;color:var(--muted)}
+.lead{font-size:18px;color:var(--fg)}
+figure{margin:22px 0;text-align:center}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px}
+figcaption{color:var(--muted);font-size:13px;margin-top:8px}
+table{border-collapse:collapse;width:100%;margin:18px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+th{background:var(--soft)}
+code{background:var(--soft);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;
+font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:16px;overflow:auto;
+font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre code{background:none;border:0;padding:0;color:inherit}
+.callout{background:var(--soft);border:1px solid var(--line);border-left:4px solid var(--accent);
+border-radius:8px;padding:14px 18px;margin:18px 0}
+.callout.win{border-left-color:var(--accent2)}
+ul,ol{padding-left:22px}
+li{margin:.25em 0}
+details{margin:10px 0 22px}
+summary{cursor:pointer;color:var(--accent);font-size:14px}
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+a{color:var(--accent)}
+.pill{font-weight:700}
+.p0{color:#c2410c}.done{color:var(--accent2);font-weight:700}
+</style></head><body><div class="wrap">
+<header class="doc"><div class="kicker">Design spec · technical view</div><h1>Conveyance — Engine Design (Technical)</h1>
+<p class="sub">Hybrid-runtime Zig reimplementation of libtransmission&#x27;s core, as a JSON-RPC daemon.</p><div class="badges"><span class="badge">Zig 0.14.x</span><span class="badge">io_uring/epoll reactor</span><span class="badge">single-mutator session thread</span><span class="badge">JSON-RPC drop-in</span></div></header>
+
+<p class="lead">Conveyance is a drop-in <code>transmission-daemon</code> replacement written in
+Zig. It speaks the same JSON-RPC/HTTP protocol and reuses an existing config directory, while
+fixing the blocking startup load and replacing free-text logging with structured, non-blocking
+records.</p>
+
+<h2>Runtime &amp; threading model</h2>
+<p><strong>Core invariant:</strong> all torrent/peer state is mutated on exactly one thread (the
+session-owner). Every other thread communicates by message. This mirrors Transmission's
+<code>run_in_session_thread</code> discipline, made explicit.</p>
+<figure><img src="https://mermaid.ink/img/pako:eNpdU01v2zAM_SuETxs2N_cdeomDzKvXCK6DHrRhUCzG1mJLgSQ3C5r-91H-Qt2DIYJ8JN97kl-j0kiMvkF0bMylrIX1kOW_NIDrDpUV5xrKRqH2jm_-KeeVrqbE74ACeN6n_BkPsE_HRL75yb0V2rXKOWV0bLE1HsfqluD0gdIw5KElAn0RtQzHOB7i-P7242n3GOdsDSv4XhTsBhQvyFkUpTeWP6KfYvA1RZL6QZk_nQ2UV4Bn0zQTQ7bmYWhDglCjHdNss8nTHWeIFoo1g3S1gy9wURbhaEVLc0ZgkT_wworyRMBAi8bvEwbOUGb0ZdQy83TYe8GfhjM2F9r7jqmj6Q150XlBEmYnt_xTYawlP0hdRXTt9fNEIl0_EFerjFQleFWe3i_OGM-MkPOO-GzMID9hPFHuRJxr4WqY89luSy1VNbf02WBTuIjStK3Q0t0mJaE4GNbXz8E0fAkXt4CQVX1daG06XSLJcF3zAZSxHjMq7XnLBSAZAC-k9ngl5her6OFIo3EBG8MeO0AOV4-0a3wZHzG9AdO0v-ZAyIQtQHfQmIraS2Olg7v4PtgUfYWoRdsKJenHeY18jW3_C0k8ChIXvb39B9VNIhY=" alt="Hybrid runtime: reactor + single-mutator session thread + worker pools" loading="lazy"><figcaption>Hybrid runtime: reactor + single-mutator session thread + worker pools</figcaption></figure><details><summary>mermaid source</summary><pre><code>flowchart LR
+  subgraph clients[Existing clients]
+    WUI[Web UI]
+    REM[transmission-remote]
+    GUI[GUI in remote mode]
+  end
+  clients --&gt;|JSON-RPC / HTTP| RPC
+  subgraph reactor[Net reactor thread -- io_uring / epoll]
+    RPC[RPC listener]
+    PEERIO[Peer TCP I/O + wire framing]
+    TRK[Tracker HTTP / UDP sockets]
+  end
+  subgraph session[Session-owner thread -- single mutator]
+    REG[(Torrent registry)]
+    TICK[Periodic tick]
+  end
+  LP[Loader thread-pool]
+  DP[Disk / hash pool]
+  LOG[Logger thread]
+  RPC --&gt;|commands| session
+  PEERIO --&gt;|peer events| session
+  TRK --&gt;|announce results| session
+  LP --&gt;|TorrentLoaded| session
+  DP --&gt;|verify / write done| session
+  session --&gt;|write bytes| reactor
+  session --&gt;|hash / write jobs| DP
+  session -. log records .-&gt; LOG</code></pre></details>
+<table>
+<tr><th>Thread / pool</th><th>Responsibility</th></tr>
+<tr><td>Net reactor</td><td>All non-blocking socket I/O (peers, trackers, RPC listener); stateless peer-wire framing; owns no torrent state. Accepts RPC at startup before any torrent loads.</td></tr>
+<tr><td>Session-owner</td><td>Single mutator of the torrent registry; drains one MPSC command/event queue; periodic tick (announces, choke rotation, stats, resume persist).</td></tr>
+<tr><td>Loader pool</td><td>One job per <code>.torrent</code>: parse metainfo + import <code>.resume</code> → post <code>TorrentLoaded</code>. Reused for <code>torrent-add</code>.</td></tr>
+<tr><td>Disk/hash pool</td><td>SHA-1 piece verification, block read/write, preallocation.</td></tr>
+<tr><td>Logger</td><td>Drains a bounded MPSC ring; producers never block (full → dropped-counter).</td></tr>
+</table>
+
+<h2>Startup streaming load (the pain-point fix)</h2>
+<p>The session thread enumerates <code>torrents/*.torrent</code>, submits one loader job each, and
+returns immediately — <em>no <code>future.get()</code> barrier</em>. Each torrent is registered and
+made live the instant its parse completes; a malformed file is logged and skipped without blocking
+the rest.</p>
+<figure><img src="https://mermaid.ink/img/pako:eNp9Us1KAzEQfpVhr9qCtl48KFvpTVBUBFl7mE1mt8FkskyyylL67iZmexDEU2CY7zdzqJTXVF1D1Vn_pfYoEV427wwQxrYXHPbQUueFmhdBDs6EYDxD9BonWCygtV59GO53GQKgjZCKeaOQAGwumueYWTWS87xLoBvYXDZPhBrOYEAJBNvX7dMbLKMXIY6ArGEpFEZH5-CZoJ3yM2tsLgvH6lBbC9ajJn2bvXRjHIWWPUVoUcSQHGfEqiDWzQPbCdh_gQkQ9zSbgjFgaws_sf6VHrtI0tx5_qQJWVEWClEI3X-p679S1yn14x2gUjTEAMqaFDaAcY60wUh22p3QZX_V3Od0AoP3tlSVbJeSEo7zCK0le8KVnPW62aLanzah9wlmzSf9RDYcIqapibmEoJCZ9IlgXQiumnoYKOllkZlmkXsdxPfpY0Iim92mvqpzqByJQ6PTIR2qpOJ-TkpTh6ON1fH4DQgfzC0=" alt="Streaming startup vs. the blocking barrier" loading="lazy"><figcaption>Streaming startup vs. the blocking barrier</figcaption></figure>
+
+<h2>Download data flow</h2>
+<figure><img src="https://mermaid.ink/img/pako:eNptkkFrwzAMhf-KyKllK2PXHAqDHAaDLZAcd1FstRFx7MxyOkrpf58cttJ1u9m89z0_CZ8KEywVJRRCHzN5QxXjPuL47gFwTsHPY0cx3yaMiQ1P6BM0gAINiXDwkPpIaG8tbba0Ec3wF6-zVhNFWClqUojrW0uVLRXLAA_Qo_QwheCyqdlst20J6H2YtS6sJClGdkloN6o2JZgwTpoLU37DsaQfss6a96TaneZ6Kz0OlNX6G-047ZicvSLYJ4ok-ohCMe9JEnQumEGuyYlJ-0x4dAEveFXCZ-RESjbPT5tHOFDk3XFp6ChHLli2V79y3l6uGvR40Em7qMEGJS2zvgZNDRoHmYlhrxVFJ47CS1U9cbBs0Lnjv4u7VFgX91CMFEdkq1_hVKSexuVTWNrh7FJxPn8BPcy5nA==" alt="Single-torrent download data flow" loading="lazy"><figcaption>Single-torrent download data flow</figcaption></figure><details><summary>mermaid source</summary><pre><code>sequenceDiagram
+  autonumber
+  participant S as Session thread
+  participant T as Tracker
+  participant P as Peer (reactor)
+  participant D as Disk / hash pool
+  S-&gt;&gt;T: announce (started)
+  T--&gt;&gt;S: compact peer list
+  S-&gt;&gt;P: connect + handshake
+  P--&gt;&gt;S: bitfield
+  S-&gt;&gt;P: interested + request blocks
+  P--&gt;&gt;S: piece payload
+  S-&gt;&gt;D: write + SHA-1 verify completed piece
+  D--&gt;&gt;S: piece OK
+  S-&gt;&gt;P: have (broadcast)
+  Note over S: progress persisted periodically
+  S-&gt;&gt;T: announce (completed)</code></pre></details>
+
+<h2>Components</h2>
+<table>
+<tr><th>Module</th><th>Responsibility</th><th>Runs on</th></tr>
+<tr><td><code>bencode</code></td><td>streaming decode/encode, zero-copy slices</td><td>pure</td></tr>
+<tr><td><code>metainfo</code></td><td>parse .torrent, infohash, file/piece layout</td><td>loader</td></tr>
+<tr><td><code>resume</code></td><td>import transmission .resume; write own format</td><td>loader/disk</td></tr>
+<tr><td><code>config</code></td><td>read settings.json; own runtime config</td><td>startup</td></tr>
+<tr><td><code>session</code></td><td>registry, command queue, tick loop</td><td>session</td></tr>
+<tr><td><code>loader</code></td><td>dir scan + per-torrent load jobs</td><td>loader</td></tr>
+<tr><td><code>net</code></td><td>reactor over io_uring/epoll</td><td>reactor</td></tr>
+<tr><td><code>tracker</code></td><td>HTTP+UDP announce/scrape</td><td>reactor+session</td></tr>
+<tr><td><code>peer</code></td><td>handshake/framing (reactor) + state (session)</td><td>split</td></tr>
+<tr><td><code>picker</code></td><td>block/piece selection (v1 rarest-first)</td><td>session</td></tr>
+<tr><td><code>storage</code></td><td>file↔block map, read/write, hash-verify</td><td>disk</td></tr>
+<tr><td><code>rpc</code></td><td>HTTP server (reactor) + JSON dispatch (session)</td><td>split</td></tr>
+<tr><td><code>log</code></td><td>structured records, bound context, async writer</td><td>→ logger</td></tr>
+</table>
+
+<h2>State compatibility</h2>
+<p><strong>Read:</strong> <code>settings.json</code>, <code>torrents/*.torrent</code> (untouched),
+<code>resume/*.resume</code> (bencode → imported). <strong>Write:</strong> our own JSON sidecars
+under a new <code>conveyance/</code> subdir; we never overwrite transmission's <code>resume/</code>,
+so reverting to the C++ daemon is safe.</p>
+
+<h2>RPC surface (v1)</h2>
+<p>JSON-RPC over HTTP, CSRF-guarded by <code>X-Transmission-Session-Id</code> (409 + header when
+missing). Methods: <code>session-get/-set/-stats</code>, <code>torrent-get/-add/-start/-stop/
+-remove/-verify/-set</code>, <code>free-space</code>. Reports matching
+<code>rpc-version</code>/<code>rpc-version-minimum</code>.</p>
+
+<h2>Errors, resources, testing</h2>
+<ul>
+<li>Zig error unions throughout; no steady-state panics. Per-torrent load failures isolated.</li>
+<li>Arena allocator per load-job / per RPC request; long-lived state in a GPA.</li>
+<li>TDD: unit tests for parsers against fixtures; golden RPC tests vs. a real daemon; a concurrency
+test asserting torrents appear individually and one bad file doesn't block others; an end-to-end
+download against a local seed + tracker.</li>
+</ul>
+
+<h2>Decomposition / roadmap</h2>
+<figure><img src="https://mermaid.ink/img/pako:eNpVkUtrwkAUhf_KJdtOUJO4KUVotaUFA4NaKKQuJjM3OnUeMjNpEPG_N68uXJ_zHT7uvUbcCoweIaqUbfiRuQDrzbcByKdFPoU3WxvBgrRmD3G8gHxW5DNYy18EwVBb81S6ycIHh0xLcwBlmYAH2NDlvh-ZDVRS5AnsHOMndH5IkiFJizwFiuhA2MZ0-BCnQ5wVedbGzksf0HBst5WskF-4wqGY9cUtTYptXcZnZ3-QB0h6r5Zwl3NnT6DeUQL09YtAg6VHFINHC44D6d1A2g9odjAYCJTK8pNqHQh8UkNHMh3J7I7MerKqlerO0AqXzIhGinAcsX_j-R0277HV-26ypisC3Fnv47NiobJOE1jGzy8f-4hApNFpJkX7s2sUjqj77wmsWK1CdLv9ASeekpw=" alt="Sub-project decomposition" loading="lazy"><figcaption>Sub-project decomposition</figcaption></figure>
+
+<footer>Source of truth: <code>docs/superpowers/specs/2026-05-24-conveyance-zig-transmission-backend-design.md</code>.
+Diagrams rendered inline via <a href="https://mermaid.ink">mermaid.ink</a>.
+Generated for the Conveyance project &mdash; 2026-05-24.</footer>
+</div></body></html>
