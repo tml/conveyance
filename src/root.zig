@@ -1,0 +1,5 @@
+// Aggregates every module's tests so `zig build test` runs them all.
+// Add a line here for each new module file as it is created.
+test {
+    _ = @import("main.zig");
+}
