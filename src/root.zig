@@ -2,4 +2,5 @@
 // Add a line here for each new module file as it is created.
 test {
     _ = @import("main.zig");
+    _ = @import("log/record.zig");
 }
