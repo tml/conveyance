@@ -3,4 +3,5 @@
 test {
     _ = @import("main.zig");
     _ = @import("log/record.zig");
+    _ = @import("log/format_ndjson.zig");
 }
