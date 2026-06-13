@@ -30,12 +30,15 @@ fn writeValue(w: anytype, v: rec.Value) !void {
             try w.writeAll("\"");
         },
         .peer => |addr| {
-            try w.print("\"{any}\"", .{addr});
+            var buf: [64]u8 = undefined;
+            var stream = std.io.fixedBufferStream(&buf);
+            try stream.writer().print("{}", .{addr});
+            try writeJsonString(w, stream.getWritten());
         },
     }
 }
 
-/// Minimal RFC 8259 string escaping (the subset our keys/messages use).
+/// RFC 8259 string escaping for all string-typed fields and keys.
 fn writeJsonString(w: anytype, s: []const u8) !void {
     try w.writeAll("\"");
     for (s) |c| {
@@ -45,7 +48,7 @@ fn writeJsonString(w: anytype, s: []const u8) !void {
             '\n' => try w.writeAll("\\n"),
             '\r' => try w.writeAll("\\r"),
             '\t' => try w.writeAll("\\t"),
-            0...0x08, 0x0b, 0x0c, 0x0e...0x1f => try w.print("\\u{x:0>4}", .{c}),
+            0...0x08, 0x0b, 0x0c, 0x0e...0x1f, 0x7f => try w.print("\\u{x:0>4}", .{c}),
             else => try w.writeByte(c),
         }
     }
@@ -82,4 +85,15 @@ test "ndjson: infohash renders as 40 hex chars" {
     var stream = std.io.fixedBufferStream(&buf);
     try write(stream.writer(), &r);
     try std.testing.expect(std.mem.indexOf(u8, stream.getWritten(), "\"ih\":\"" ++ ("ab" ** 20) ++ "\"") != null);
+}
+
+test "ndjson: AF.UNIX peer path is JSON-escaped" {
+    // Unix socket paths can contain '"' and '\\' — these must be escaped, not
+    // passed through Address.format verbatim. We don't construct an AF.UNIX
+    // Address (platform-specific API); instead we run the escape contract over
+    // an arbitrary string with hostile bytes and assert writeJsonString quotes/escapes it.
+    var buf: [128]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try writeJsonString(stream.writer(), "/tmp/it\"s\\bad");
+    try std.testing.expectEqualStrings("\"/tmp/it\\\"s\\\\bad\"", stream.getWritten());
 }
