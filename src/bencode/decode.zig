@@ -6,8 +6,14 @@ pub const Error = error{
     InvalidString,
     InvalidStructure,
     TrailingData,
+    NestingDepth,
     OutOfMemory,
 };
+
+/// Maximum nesting depth for lists/dicts. Generous compared to real-world
+/// torrents (Transmission uses ~64); set to 512 to allow uncommon-but-valid
+/// nesting while still bounding stack use to a few hundred KB.
+pub const max_depth: usize = 512;
 
 pub const Value = union(enum) {
     int: i64,
@@ -19,10 +25,18 @@ pub const Value = union(enum) {
 
 pub const Pair = struct { key: []const u8, value: Value };
 
-/// Cursor over the input. `pos` advances as values are parsed.
+/// Cursor over the input. `pos` advances as values are parsed; on any error
+/// return, `pos` is undefined and the parser must not be reused.
+///
+/// `allocator` MUST be an arena (or arena-backed). `parseList`/`parseDict` allocate
+/// the list/dict slices via it; Value trees have no recursive destructor. On
+/// partial-parse failure, `errdefer` only frees the outer ArrayList — already-
+/// appended child trees stay alive until the arena is reset. Do NOT pass a GPA
+/// expecting per-Value cleanup on error.
 pub const Parser = struct {
     input: []const u8,
     pos: usize = 0,
+    depth: usize = 0,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, input: []const u8) Parser {
@@ -44,7 +58,6 @@ pub const Parser = struct {
         self.pos += 1; // consume 'e'
         if (digits.len == 0) return Error.InvalidInteger;
         // reject leading zeros ("i03e") and "-0"
-        if (std.mem.eql(u8, digits, "-0")) return Error.InvalidInteger;
         if (digits[0] == '0' and digits.len > 1) return Error.InvalidInteger;
         if (digits.len > 1 and digits[0] == '-' and digits[1] == '0') return Error.InvalidInteger;
         return std.fmt.parseInt(i64, digits, 10) catch Error.InvalidInteger;
@@ -62,6 +75,9 @@ pub const Parser = struct {
         return self.input[start..end];
     }
 
+    /// Parse the next value from the current position. Does NOT verify that
+    /// the input has been fully consumed; use parseTop for complete-document
+    /// parsing.
     pub fn parseValue(self: *Parser) Error!Value {
         const c = try self.peek();
         return switch (c) {
@@ -74,6 +90,9 @@ pub const Parser = struct {
     }
 
     fn parseList(self: *Parser) Error!Value {
+        if (self.depth >= max_depth) return Error.NestingDepth;
+        self.depth += 1;
+        defer self.depth -= 1;
         self.pos += 1; // 'l'
         var items = std.ArrayList(Value).init(self.allocator);
         errdefer items.deinit();
@@ -87,6 +106,9 @@ pub const Parser = struct {
     }
 
     fn parseDict(self: *Parser) Error!Value {
+        if (self.depth >= max_depth) return Error.NestingDepth;
+        self.depth += 1;
+        defer self.depth -= 1;
         self.pos += 1; // 'd'
         var pairs = std.ArrayList(Pair).init(self.allocator);
         errdefer pairs.deinit();
@@ -110,6 +132,7 @@ pub const Parser = struct {
 
     /// Returns the byte range [start,end) of the raw encoding of the next value
     /// WITHOUT building a tree. Used to capture the info-dict bytes for infohash.
+    /// On error, `pos` is undefined — do not reuse the parser.
     pub fn rawSpanOfValue(self: *Parser) Error![]const u8 {
         const start = self.pos;
         _ = try self.parseValueSkip();
@@ -122,11 +145,17 @@ pub const Parser = struct {
             'i' => _ = try self.parseInt(),
             '0'...'9' => _ = try self.parseString(),
             'l' => {
+                if (self.depth >= max_depth) return Error.NestingDepth;
+                self.depth += 1;
+                defer self.depth -= 1;
                 self.pos += 1;
                 while (try self.peek() != 'e') try self.parseValueSkip();
                 self.pos += 1;
             },
             'd' => {
+                if (self.depth >= max_depth) return Error.NestingDepth;
+                self.depth += 1;
+                defer self.depth -= 1;
                 self.pos += 1;
                 while (try self.peek() != 'e') {
                     _ = try self.parseString();
@@ -180,6 +209,31 @@ test "decode: nested list" {
     try std.testing.expectEqual(@as(usize, 3), v.list.len);
     try std.testing.expectEqual(@as(i64, 1), v.list[0].int);
     try std.testing.expectEqualStrings("abc", v.list[2].str);
+}
+
+test "decode: structurally nested list" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var p = Parser.init(arena.allocator(), "lli1eee");
+    const v = try p.parseTop();
+    try std.testing.expectEqual(@as(usize, 1), v.list.len);
+    try std.testing.expectEqual(@as(usize, 1), v.list[0].list.len);
+    try std.testing.expectEqual(@as(i64, 1), v.list[0].list[0].int);
+}
+
+test "decode: nesting depth limit enforced" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    // max_depth+1 levels of 'l' opens — must error before stack overflow.
+    var buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer buf.deinit();
+    const over = max_depth + 1;
+    var i: usize = 0;
+    while (i < over) : (i += 1) try buf.append('l');
+    i = 0;
+    while (i < over) : (i += 1) try buf.append('e');
+    var p = Parser.init(arena.allocator(), buf.items);
+    try std.testing.expectError(Error.NestingDepth, p.parseTop());
 }
 
 test "decode: dict with mixed values" {
