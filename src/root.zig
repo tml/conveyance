@@ -8,4 +8,5 @@ test {
     _ = @import("log/ring.zig");
     _ = @import("log/logger.zig");
     _ = @import("bencode/decode.zig");
+    _ = @import("bencode/encode.zig");
 }
