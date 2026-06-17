@@ -17,18 +17,26 @@ pub const Log = struct {
     ring: Ring,
     sink: Sink,
     level: rec.Level,
+    /// Count of records refused because the ring was full. No reader in M0;
+    /// a future milestone will expose a `droppedCount()` accessor.
     dropped: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     thread: ?std.Thread = null,
 
+    /// Heap-allocates Log and spawns the writer thread. Caller must call
+    /// `deinit()` (drains + joins + frees the ring) AND `allocator.destroy(log)`
+    /// to release the Log allocation itself.
     pub fn init(allocator: std.mem.Allocator, capacity: usize, level: rec.Level, sink: Sink) !*Log {
         const self = try allocator.create(Log);
+        errdefer allocator.destroy(self);
         self.* = .{ .ring = try Ring.init(allocator, capacity), .sink = sink, .level = level };
+        errdefer self.ring.deinit();
         self.thread = try std.Thread.spawn(.{}, writerLoop, .{self});
         return self;
     }
 
     /// Stops the writer thread, drains remaining records, frees the ring.
-    /// Does not free `self` itself — caller's allocator owns that.
+    /// Does NOT free the Log allocation itself — caller must follow with
+    /// `allocator.destroy(log)`.
     pub fn deinit(self: *Log) void {
         self.ring.close();
         if (self.thread) |t| t.join();
@@ -46,6 +54,9 @@ pub const Log = struct {
     }
 
     fn writerLoop(self: *Log) void {
+        // Records whose formatted size exceeds 4095 bytes are silently dropped
+        // via `catch continue` on the format call (FixedBufferStream returns
+        // error.NoSpaceLeft). Adequate for typical records (12 short fields).
         var buf: [4096]u8 = undefined;
         while (self.ring.pop()) |r| {
             var stream = std.io.fixedBufferStream(&buf);
@@ -54,8 +65,8 @@ pub const Log = struct {
                 .ndjson => ndjson.write(w, &r) catch continue,
                 .pretty => pretty.write(w, &r, self.sink.color) catch continue,
             }
-            w.writeByte('\n') catch {};
             self.sink.writer.writeAll(stream.getWritten()) catch {};
+            self.sink.writer.writeByte('\n') catch {};
         }
     }
 };
