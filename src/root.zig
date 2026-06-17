@@ -7,4 +7,5 @@ test {
     _ = @import("log/format_pretty.zig");
     _ = @import("log/ring.zig");
     _ = @import("log/logger.zig");
+    _ = @import("bencode/decode.zig");
 }
