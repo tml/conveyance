@@ -61,6 +61,82 @@ pub const Parser = struct {
         self.pos = end;
         return self.input[start..end];
     }
+
+    pub fn parseValue(self: *Parser) Error!Value {
+        const c = try self.peek();
+        return switch (c) {
+            'i' => .{ .int = try self.parseInt() },
+            'l' => try self.parseList(),
+            'd' => try self.parseDict(),
+            '0'...'9' => .{ .str = try self.parseString() },
+            else => Error.InvalidStructure,
+        };
+    }
+
+    fn parseList(self: *Parser) Error!Value {
+        self.pos += 1; // 'l'
+        var items = std.ArrayList(Value).init(self.allocator);
+        errdefer items.deinit();
+        while (true) {
+            if (try self.peek() == 'e') {
+                self.pos += 1;
+                return .{ .list = try items.toOwnedSlice() };
+            }
+            try items.append(try self.parseValue());
+        }
+    }
+
+    fn parseDict(self: *Parser) Error!Value {
+        self.pos += 1; // 'd'
+        var pairs = std.ArrayList(Pair).init(self.allocator);
+        errdefer pairs.deinit();
+        while (true) {
+            if (try self.peek() == 'e') {
+                self.pos += 1;
+                return .{ .dict = try pairs.toOwnedSlice() };
+            }
+            const key = try self.parseString();
+            const value = try self.parseValue();
+            try pairs.append(.{ .key = key, .value = value });
+        }
+    }
+
+    /// Parse exactly one top-level value; error if trailing bytes remain.
+    pub fn parseTop(self: *Parser) Error!Value {
+        const v = try self.parseValue();
+        if (self.pos != self.input.len) return Error.TrailingData;
+        return v;
+    }
+
+    /// Returns the byte range [start,end) of the raw encoding of the next value
+    /// WITHOUT building a tree. Used to capture the info-dict bytes for infohash.
+    pub fn rawSpanOfValue(self: *Parser) Error![]const u8 {
+        const start = self.pos;
+        _ = try self.parseValueSkip();
+        return self.input[start..self.pos];
+    }
+
+    fn parseValueSkip(self: *Parser) Error!void {
+        const c = try self.peek();
+        switch (c) {
+            'i' => _ = try self.parseInt(),
+            '0'...'9' => _ = try self.parseString(),
+            'l' => {
+                self.pos += 1;
+                while (try self.peek() != 'e') try self.parseValueSkip();
+                self.pos += 1;
+            },
+            'd' => {
+                self.pos += 1;
+                while (try self.peek() != 'e') {
+                    _ = try self.parseString();
+                    try self.parseValueSkip();
+                }
+                self.pos += 1;
+            },
+            else => return Error.InvalidStructure,
+        }
+    }
 };
 
 test "decode: positive and negative integers" {
@@ -89,4 +165,47 @@ test "decode: string is a zero-copy slice of input" {
 test "decode: truncated string errors" {
     var p = Parser.init(std.testing.allocator, "5:hel");
     try std.testing.expectError(Error.Truncated, p.parseString());
+}
+
+fn dictGet(v: Value, key: []const u8) ?Value {
+    for (v.dict) |pair| if (std.mem.eql(u8, pair.key, key)) return pair.value;
+    return null;
+}
+
+test "decode: nested list" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var p = Parser.init(arena.allocator(), "li1ei2e3:abce");
+    const v = try p.parseTop();
+    try std.testing.expectEqual(@as(usize, 3), v.list.len);
+    try std.testing.expectEqual(@as(i64, 1), v.list[0].int);
+    try std.testing.expectEqualStrings("abc", v.list[2].str);
+}
+
+test "decode: dict with mixed values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var p = Parser.init(arena.allocator(), "d3:cow3:moo4:spami42ee");
+    const v = try p.parseTop();
+    try std.testing.expectEqualStrings("moo", dictGet(v, "cow").?.str);
+    try std.testing.expectEqual(@as(i64, 42), dictGet(v, "spam").?.int);
+}
+
+test "decode: trailing data rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var p = Parser.init(arena.allocator(), "i1eX");
+    try std.testing.expectError(Error.TrailingData, p.parseTop());
+}
+
+test "decode: rawSpanOfValue captures exact dict bytes" {
+    const input = "d4:infod1:ai1eee"; // {info: {a:1}}
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var p = Parser.init(arena.allocator(), input);
+    // manually walk to the value of "info"
+    p.pos += 1; // 'd'
+    _ = try p.parseString(); // "info"
+    const span = try p.rawSpanOfValue();
+    try std.testing.expectEqualStrings("d1:ai1ee", span);
 }
