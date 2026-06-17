@@ -6,4 +6,5 @@ test {
     _ = @import("log/format_ndjson.zig");
     _ = @import("log/format_pretty.zig");
     _ = @import("log/ring.zig");
+    _ = @import("log/logger.zig");
 }
