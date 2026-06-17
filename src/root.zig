@@ -5,4 +5,5 @@ test {
     _ = @import("log/record.zig");
     _ = @import("log/format_ndjson.zig");
     _ = @import("log/format_pretty.zig");
+    _ = @import("log/ring.zig");
 }
