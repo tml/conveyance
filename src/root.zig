@@ -11,4 +11,5 @@ test {
     _ = @import("bencode/encode.zig");
     _ = @import("metainfo/metainfo.zig");
     _ = @import("resume_state/import.zig");
+    _ = @import("resume_state/sidecar.zig");
 }
