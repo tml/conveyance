@@ -42,6 +42,12 @@ fn getInt(v: dec.Value, key: []const u8) Error!i64 {
     return f.int;
 }
 
+fn getU64(v: dec.Value, key: []const u8) Error!u64 {
+    const n = try getInt(v, key);
+    if (n < 0) return Error.BadType;
+    return @intCast(n);
+}
+
 /// Parses `.torrent` bytes. Allocations (files slice) come from `arena`.
 /// String fields are slices into `bytes`, so `bytes` must outlive the result.
 pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
@@ -68,18 +74,22 @@ pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
     std.crypto.hash.Sha1.hash(info_span, &ih, .{});
 
     const name = try getStr(info, "name");
-    const piece_length: u64 = @intCast(try getInt(info, "piece length"));
+    const piece_length: u64 = try getU64(info, "piece length");
     const pieces = try getStr(info, "pieces");
+    if (pieces.len == 0 or pieces.len % 20 != 0) return Error.BadType;
 
     var files = std.ArrayList(FileEntry).init(arena);
     var total: u64 = 0;
     if (get(info, "files")) |files_v| {
         if (files_v != .list) return Error.BadType;
         for (files_v.list) |fe| {
-            const len: u64 = @intCast(try getInt(fe, "length"));
+            const len: u64 = try getU64(fe, "length");
             const path_v = get(fe, "path") orelse return Error.MissingField;
             if (path_v != .list) return Error.BadType;
+            if (path_v.list.len == 0) return Error.MissingField;
             var parts = std.ArrayList(u8).init(arena);
+            // TODO: sanitize path components ('..' / '/') before the storage
+            // layer uses this for filesystem writes.
             for (path_v.list, 0..) |seg, i| {
                 if (seg != .str) return Error.BadType;
                 if (i != 0) try parts.append('/');
@@ -89,7 +99,7 @@ pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
             total += len;
         }
     } else {
-        const len: u64 = @intCast(try getInt(info, "length"));
+        const len: u64 = try getU64(info, "length");
         try files.append(.{ .length = len, .path = name });
         total = len;
     }
@@ -101,7 +111,10 @@ pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
         .total_length = total,
         .files = try files.toOwnedSlice(),
         .info_hash = ih,
-        .announce = getStr(root, "announce") catch null,
+        .announce = getStr(root, "announce") catch |e| switch (e) {
+            error.MissingField => null,
+            else => return e,
+        },
     };
 }
 
@@ -122,4 +135,34 @@ test "metainfo: parses single-file fixture" {
     var got_hex: [40]u8 = undefined;
     _ = std.fmt.bufPrint(&got_hex, "{s}", .{std.fmt.fmtSliceHexLower(&mi.info_hash)}) catch unreachable;
     try std.testing.expectEqualStrings(expected_hex, &got_hex);
+}
+
+test "metainfo: rejects negative length" {
+    // info dict with length = -1 (malformed)
+    const bytes =
+        "d8:announce20:http://tracker:6969/4:infod6:lengthi-1e4:name9:hello.txt12:piece lengthi16384e6:pieces20:" ++
+        ("\x00" ** 20) ++ "ee";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.BadType, parse(arena.allocator(), bytes));
+}
+
+test "metainfo: rejects pieces length not multiple of 20" {
+    // pieces blob is 19 bytes — invalid
+    const bytes =
+        "d8:announce20:http://tracker:6969/4:infod6:lengthi11e4:name9:hello.txt12:piece lengthi16384e6:pieces19:" ++
+        ("\x00" ** 19) ++ "ee";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.BadType, parse(arena.allocator(), bytes));
+}
+
+test "metainfo: announce of wrong type is rejected, not silently null" {
+    // announce is an integer (42) instead of a string
+    const bytes =
+        "d8:announcei42e4:infod6:lengthi11e4:name9:hello.txt12:piece lengthi16384e6:pieces20:" ++
+        ("\x00" ** 20) ++ "ee";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.BadType, parse(arena.allocator(), bytes));
 }
