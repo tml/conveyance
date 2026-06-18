@@ -75,6 +75,7 @@ pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
 
     const name = try getStr(info, "name");
     const piece_length: u64 = try getU64(info, "piece length");
+    if (piece_length == 0) return Error.BadType;
     const pieces = try getStr(info, "pieces");
     if (pieces.len == 0 or pieces.len % 20 != 0) return Error.BadType;
 
@@ -96,7 +97,7 @@ pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Error!Metainfo {
                 try parts.appendSlice(seg.str);
             }
             try files.append(.{ .length = len, .path = try parts.toOwnedSlice() });
-            total += len;
+            total = std.math.add(u64, total, len) catch return Error.BadType;
         }
     } else {
         const len: u64 = try getU64(info, "length");
@@ -161,6 +162,33 @@ test "metainfo: announce of wrong type is rejected, not silently null" {
     // announce is an integer (42) instead of a string
     const bytes =
         "d8:announcei42e4:infod6:lengthi11e4:name9:hello.txt12:piece lengthi16384e6:pieces20:" ++
+        ("\x00" ** 20) ++ "ee";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.BadType, parse(arena.allocator(), bytes));
+}
+
+test "metainfo: rejects piece_length=0" {
+    const bytes =
+        "d8:announce20:http://tracker:6969/4:infod6:lengthi11e4:name9:hello.txt12:piece lengthi0e6:pieces20:" ++
+        ("\x00" ** 20) ++ "ee";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectError(Error.BadType, parse(arena.allocator(), bytes));
+}
+
+test "metainfo: rejects total_length overflow across files" {
+    // Three files each at i64 max (the largest value the bencode i64 decoder
+    // can represent).  Two of them sum to 2^64-2 which still fits in u64, but
+    // adding the third (2^63-1) pushes the total past 2^64-1, triggering the
+    // std.math.add overflow guard.
+    const max_str = "9223372036854775807"; // i64 max as decimal
+    const bytes =
+        "d4:infod5:filesl" ++
+        "d6:lengthi" ++ max_str ++ "e4:pathl3:oneee" ++
+        "d6:lengthi" ++ max_str ++ "e4:pathl3:twoee" ++
+        "d6:lengthi" ++ max_str ++ "e4:pathl5:threeee" ++
+        "e4:name3:dir12:piece lengthi16384e6:pieces20:" ++
         ("\x00" ** 20) ++ "ee";
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
