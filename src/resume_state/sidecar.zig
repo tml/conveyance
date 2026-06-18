@@ -1,8 +1,12 @@
 const std = @import("std");
 const ResumeState = @import("import.zig").ResumeState;
 
-/// Our own resume format: a JSON object per torrent. Owned, not zero-copy.
-/// `info_hash` keys the file on disk; included here for self-description.
+/// Our own resume format: a JSON object per torrent.
+/// `info_hash_hex` is owned by value; `name` and `destination` borrow from the
+/// `ResumeState` passed to `fromImport` (and ultimately from the original
+/// .resume source bytes), so the caller must keep that source alive until
+/// `write` has been called. Use the `Parsed` returned by `read` for owned
+/// fields on the read side.
 pub const Sidecar = struct {
     info_hash_hex: [40]u8,
     name: []const u8,
@@ -54,7 +58,7 @@ const Stored = struct {
     downloaded: u64,
     uploaded: u64,
     paused: bool,
-    destination: ?[]const u8,
+    destination: ?[]const u8 = null,
 };
 
 pub fn read(allocator: std.mem.Allocator, json_bytes: []const u8) !Parsed {
@@ -86,4 +90,27 @@ test "sidecar: write then read round-trips fields" {
     try std.testing.expectEqual(true, v.paused);
     try std.testing.expectEqualStrings("/tmp", v.destination.?);
     try std.testing.expectEqualStrings("ab" ** 20, v.info_hash);
+}
+
+test "sidecar: destination=null round-trips" {
+    const s = Sidecar{
+        .info_hash_hex = ("cd" ** 20).*,
+        .name = "unknown.bin",
+        .downloaded = 0,
+        .uploaded = 0,
+        .paused = false,
+        .destination = null,
+    };
+
+    var buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer buf.deinit();
+    try write(buf.writer(), s);
+
+    var parsed = try read(std.testing.allocator, buf.items);
+    defer parsed.deinit();
+    const v = parsed.value();
+
+    try std.testing.expectEqual(@as(?[]const u8, null), v.destination);
+    try std.testing.expectEqualStrings("unknown.bin", v.name);
+    try std.testing.expectEqualStrings("cd" ** 20, v.info_hash);
 }
