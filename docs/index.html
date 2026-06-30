@@ -1,0 +1,94 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conveyance Docs</title>
+<style>
+:root{--fg:#1c2330;--muted:#5b6676;--bg:#ffffff;--soft:#f5f7fa;--line:#e3e8ef;
+--accent:#2f6df6;--accent2:#0aa676;--code:#0b1020;--codefg:#e6edf3;}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+color:var(--fg);background:var(--bg)}
+.wrap{max-width:880px;margin:0 auto;padding:48px 24px 96px}
+header.doc{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:32px}
+.kicker{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+h1{font-size:36px;line-height:1.1;margin:.25em 0 .15em}
+h2{font-size:20px;margin:2em 0 .6em;padding-top:.4em;border-top:1px solid var(--line)}
+.sub{color:var(--muted);font-size:17px;margin:.2em 0 0}
+.lead{font-size:17px;color:var(--fg);margin:0 0 1.2em}
+.cards{display:grid;grid-template-columns:1fr;gap:14px;margin:18px 0 8px}
+.card{border:1px solid var(--line);border-radius:10px;padding:18px 20px;background:var(--soft)}
+.card h3{margin:0 0 .35em;font-size:17px;color:var(--fg)}
+.card p{margin:.25em 0 .8em;color:var(--muted);font-size:14.5px}
+.row{display:flex;flex-wrap:wrap;gap:10px}
+a.btn{display:inline-block;padding:6px 12px;border-radius:999px;border:1px solid var(--line);
+background:#fff;text-decoration:none;font-size:13.5px;color:var(--accent);font-weight:600}
+a.btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+a.btn.tech{color:var(--accent2)}
+a.btn.tech:hover{background:var(--accent2);color:#fff;border-color:var(--accent2)}
+a.btn.src{color:var(--muted)}
+footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+a{color:var(--accent)}
+code{background:var(--soft);border:1px solid var(--line);border-radius:5px;padding:.05em .35em;
+font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style></head><body><div class="wrap">
+
+<header class="doc">
+<div class="kicker">Conveyance</div>
+<h1>Project Documentation</h1>
+<p class="sub">A Zig drop-in replacement for the Transmission BitTorrent daemon.</p>
+</header>
+
+<p class="lead">Conveyance reimplements Transmission's core engine in Zig, packaged so the
+existing web UI, <code>transmission-remote</code>, and remote-mode GUIs work unchanged. It
+targets two everyday pains: the daemon's startup that blocks until every torrent has been
+read sequentially, and free-text logging. Each document below comes in a business-facing and
+a deeply-technical pass; the markdown source is the authoritative version.</p>
+
+<h2>Design spec</h2>
+<div class="cards">
+<div class="card">
+<h3>What Conveyance is and how it's organised</h3>
+<p>The full design: runtime + threading model, component breakdown, data flows, state
+compatibility, RPC surface, decomposition into milestones.</p>
+<div class="row">
+<a class="btn" href="specs/2026-05-24-conveyance-zig-transmission-backend-design.business.html">Business view</a>
+<a class="btn tech" href="specs/2026-05-24-conveyance-zig-transmission-backend-design.technical.html">Technical view</a>
+<a class="btn src" href="https://github.com/tml/conveyance/blob/master/docs/superpowers/specs/2026-05-24-conveyance-zig-transmission-backend-design.md">Markdown source</a>
+</div>
+</div>
+</div>
+
+<h2>M0 Foundation — implementation plan</h2>
+<div class="cards">
+<div class="card">
+<h3>13 TDD tasks for the foundation milestone</h3>
+<p>Buildable Zig skeleton, async structured logging, and the pure parsers (bencode,
+metainfo + infohash, resume import + own JSON sidecar). Fully unit-testable via
+<code>zig build test</code>.</p>
+<div class="row">
+<a class="btn" href="plans/2026-05-24-conveyance-m0-foundation.business.html">Business view</a>
+<a class="btn tech" href="plans/2026-05-24-conveyance-m0-foundation.technical.html">Technical view</a>
+<a class="btn src" href="https://github.com/tml/conveyance/blob/master/docs/superpowers/plans/2026-05-24-conveyance-m0-foundation.md">Markdown source</a>
+</div>
+</div>
+</div>
+
+<h2>Project</h2>
+<div class="cards">
+<div class="card">
+<h3>Source, milestones, and current state</h3>
+<p>Work is tracked in <a href="https://github.com/steveyegge/beads">beads</a> issues
+(milestones M0&ndash;M4 as epics). M0 is complete; M1 (live daemon + streaming startup load)
+is next.</p>
+<div class="row">
+<a class="btn src" href="https://github.com/tml/conveyance">GitHub repo</a>
+<a class="btn src" href="https://github.com/tml/conveyance/pulls">Pull requests</a>
+</div>
+</div>
+</div>
+
+<footer>
+Documentation site served by GitHub Pages from <code>master:/docs</code>.
+Diagrams in the technical passes render via <a href="https://mermaid.ink">mermaid.ink</a>.
+</footer>
+
+</div></body></html>
