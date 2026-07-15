@@ -1,0 +1,12 @@
+.{
+    .name = .conveyance,
+    .version = "0.0.0",
+    .fingerprint = 0xe7909406f46ed16,
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
